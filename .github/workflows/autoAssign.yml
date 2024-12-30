@@ -1,0 +1,20 @@
+name: Auto Assign Issues and PRs
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+  issues:
+    types: [opened]
+
+jobs:
+  auto-assign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Auto-assign issue"
+        uses: wow-actions/auto-assign@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          reviewers: |
+            Glowstudent777
+          assignees: Glowstudent777
+          skipKeywords: wip, draft
