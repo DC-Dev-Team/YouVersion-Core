@@ -39,7 +39,16 @@ export const getVerse = async (
       message: `Could not find book '${book}' by name or alias.`,
     };
 
-  let URL = `${baseURL}/${versionFinder.id}/${bookFinder.aliases[0]}.${chapter}.${verses}`;
+  let URL;
+  verses == "-1"
+    ? (URL = `${baseURL}/${versionFinder.id}/${bookFinder.aliases[0]}.${chapter}`)
+    : (URL = `${baseURL}/${versionFinder.id}/${bookFinder.aliases[0]}.${chapter}.${verses}`);
+
+  interface verseType {
+    verseNumber: number;
+    verseContent: string;
+  }
+  const versesArray: verseType[] = [];
 
   try {
     const { data } = await axios.get(URL);
@@ -52,13 +61,54 @@ export const getVerse = async (
     const nextWay = $("script#__NEXT_DATA__").eq(0);
     if (nextWay) {
       let json = JSON.parse(nextWay.html() || "");
-      const verse = json.props.pageProps.verses[0].content;
-      const reference = json.props.pageProps.verses[0].reference.human;
 
-      return {
-        citation: `${reference}`,
-        passage: verse,
-      };
+      if (verses == "-1") {
+        const fullChapter = cheerio
+          .load(json.props.pageProps.chapterInfo.content)
+          .html();
+
+        // Split each verse into an array.
+        const paverses = fullChapter.split(
+          /<span class="label">[0-9]*<\/span>/g
+        );
+        let title = cheerio.load(paverses[0])(".heading").text();
+        paverses.shift();
+
+        // Verses" { "1": "...", "2": "...", ... }
+        paverses.forEach((verse: string, index: number) => {
+          const verseNumber = index + 1;
+
+          verse = cheerio.load(verse)(".content").text();
+          verse = verse.replace(/\n/g, " ").trim();
+
+          versesArray.push({
+            verseNumber: verseNumber,
+            verseContent: verse,
+          });
+        });
+
+        const versesObject = versesArray.reduce(
+          (acc: { [key: number]: string }, verse) => {
+            acc[verse.verseNumber] = verse.verseContent;
+            return acc;
+          },
+          {}
+        );
+
+        return {
+          title: title,
+          verses: versesObject,
+          citation: `${bookFinder.book} ${chapter}`,
+        };
+      } else {
+        const verse = json.props.pageProps.verses[0].content;
+        const reference = json.props.pageProps.verses[0].reference.human;
+
+        return {
+          citation: `${reference}`,
+          passage: verse,
+        };
+      }
     }
     // Old way :(
     else {
