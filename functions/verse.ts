@@ -18,12 +18,31 @@ export const getVerse = async (
   version: string
 ) => {
   let versionFinder: any = {
-    version: (Object.keys(versions)[
-      Object.keys(versions).indexOf(
-        version.toLocaleString().toLocaleUpperCase()
-      )
-    ] ??= "NIV"),
-    id: (versions[version.toString().toLocaleUpperCase()] ??= 1),
+    version: (function () {
+      const parsedVersion: number = parseInt(version, 10);
+
+      if (!isNaN(parsedVersion)) {
+        return parsedVersion;
+      } else {
+        return (
+          Object.keys(versions).find(
+            (key) => key.toLocaleUpperCase() === version.toLocaleUpperCase()
+          ) ?? "NIV"
+        );
+      }
+    })(),
+    id: (function () {
+      const parsedVersion = parseInt(version, 10);
+
+      if (!isNaN(parsedVersion)) {
+        return parsedVersion;
+      } else {
+        const versionKey = Object.keys(versions).find(
+          (key) => key.toUpperCase() === version.toUpperCase()
+        );
+        return versionKey ? versions[versionKey] : 111;
+      }
+    })(),
   };
 
   let bookFinder =
