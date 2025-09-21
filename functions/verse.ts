@@ -6,16 +6,16 @@ const bookList = require("../db/books.json");
 const baseURL = "https://www.bible.com/bible";
 
 type bookType = {
-  book: String;
-  aliases: Array<String>;
-  chapters: Number;
+  book: string;
+  aliases: string[];
+  chapters: number;
 };
 
 export const getVerse = async (
   book: string,
   chapter: string,
   verses: string,
-  version: string
+  version: string,
 ) => {
   let versionFinder: any = {
     version: (function () {
@@ -26,8 +26,8 @@ export const getVerse = async (
       } else {
         return (
           Object.keys(versions).find(
-            (key) => key.toLocaleUpperCase() === version.toLocaleUpperCase()
-          ) ?? "NIV"
+            (key) => key.toLocaleUpperCase() === version.toLocaleUpperCase(),
+          ) ?? "KJV"
         );
       }
     })(),
@@ -38,7 +38,7 @@ export const getVerse = async (
         return parsedVersion;
       } else {
         const versionKey = Object.keys(versions).find(
-          (key) => key.toUpperCase() === version.toUpperCase()
+          (key) => key.toUpperCase() === version.toUpperCase(),
         );
         return versionKey ? versions[versionKey] : 111;
       }
@@ -47,10 +47,10 @@ export const getVerse = async (
 
   let bookFinder =
     bookList.books.find(
-      (o: bookType) => o.book.toLowerCase() === book.toLowerCase()
+      (o: bookType) => o.book.toLowerCase() === book.toLowerCase(),
     ) ||
     bookList.books.find((o: bookType) =>
-      o.aliases.includes(book.toUpperCase())
+      o.aliases.includes(book.toUpperCase()),
     );
   if (!bookFinder)
     return {
@@ -58,10 +58,7 @@ export const getVerse = async (
       message: `Could not find book '${book}' by name or alias.`,
     };
 
-  let URL;
-  verses == "-1"
-    ? (URL = `${baseURL}/${versionFinder.id}/${bookFinder.aliases[0]}.${chapter}`)
-    : (URL = `${baseURL}/${versionFinder.id}/${bookFinder.aliases[0]}.${chapter}.${verses}`);
+  let URL = `${baseURL}/${versionFinder.id}/${bookFinder.aliases[0]}.${chapter}`;
 
   interface verseType {
     verseNumber: number;
@@ -81,71 +78,99 @@ export const getVerse = async (
     if (nextWay) {
       let json = JSON.parse(nextWay.html() || "");
 
-      if (verses == "-1") {
-        const fullChapter = cheerio
-          .load(json.props.pageProps.chapterInfo.content)
-          .html();
+      const fullChapter = cheerio
+        .load(json.props.pageProps.chapterInfo.content)
+        .html();
 
-        // Split each verse into an array.
-        const paverses = fullChapter.split(
-          /<span class="label">[0-9]*<\/span>/g
-        );
-        let title = cheerio.load(paverses[0])(".heading").text();
-        paverses.shift();
+      // Split each verse into an array.
+      const paverses = fullChapter.split(/<span class="label">[0-9]*<\/span>/g);
+      paverses.shift();
 
-        // Verses" { "1": "...", "2": "...", ... }
-        paverses.forEach((verse: string, index: number) => {
-          const verseNumber = index + 1;
+      // Build verses
+      paverses.forEach((verse: string, index: number) => {
+        const verseNumber = index + 1;
 
-          verse = cheerio.load(verse)(".content").text();
-          verse = verse.replace(/\n/g, " ").trim();
+        verse = cheerio.load(verse)(".content").text();
+        verse = verse.replace(/\n/g, " ").trim();
 
+        if (matchesRange(verses, verseNumber)) {
           versesArray.push({
-            verseNumber: verseNumber,
+            verseNumber,
             verseContent: verse,
           });
-        });
+        }
+      });
 
-        const versesObject = versesArray.reduce(
-          (acc: { [key: number]: string }, verse) => {
-            acc[verse.verseNumber] = verse.verseContent;
-            return acc;
-          },
-          {}
-        );
+      const versesObject = versesArray.reduce(
+        (acc: { [key: number]: string }, verse) => {
+          acc[verse.verseNumber] = verse.verseContent;
+          return acc;
+        },
+        {},
+      );
 
-        return {
-          title: title,
-          verses: versesObject,
-          citation: `${bookFinder.book} ${chapter}`,
-        };
-      } else {
-        const verse = json.props.pageProps.verses[0].content;
-        const reference = json.props.pageProps.verses[0].reference.human;
-
-        return {
-          citation: `${reference}`,
-          passage: verse,
-        };
-      }
+      return {
+        verses: versesObject,
+        citation: `${bookFinder.book} ${chapter}:${verses}`,
+      };
     }
     // Old way :(
     else {
-      const versesArray: Array<String> = [];
+      const fallbackVerses: verseType[] = [];
       const wrapper = $(".text-17");
 
-      await wrapper.each((i, p) => {
+      wrapper.each((i, p) => {
         let unformattedVerse = $(p).eq(0).text();
-        let formattedVerse = unformattedVerse.replace(/\n/g, " ");
-        versesArray.push(formattedVerse);
+        let formattedVerse = unformattedVerse.replace(/\n/g, " ").trim();
+
+        if (matchesRange(verses, i + 1)) {
+          fallbackVerses.push({
+            verseNumber: i + 1,
+            verseContent: formattedVerse,
+          });
+        }
       });
+
+      const versesObject = fallbackVerses.reduce(
+        (acc: { [key: number]: string }, verse) => {
+          acc[verse.verseNumber] = verse.verseContent;
+          return acc;
+        },
+        {},
+      );
 
       return {
         citation: `${bookFinder.book} ${chapter}:${verses}`,
-        passage: versesArray[0],
+        verses: versesObject,
       };
     }
   } catch (err) {
     console.error(err);
   }
 };
+
+function matchesRange(input: string, num: number): boolean {
+  // Split on commas to support lists like "3,5,7-10"
+  const parts = input.split(",").map((p) => p.trim());
+
+  for (const part of parts) {
+    // Case: single number (e.g. "5")
+    if (/^\d+$/.test(part)) {
+      if (num === parseInt(part, 10)) {
+        return true;
+      }
+    }
+
+    // Case: range (e.g. "4-13")
+    const rangeMatch = part.match(/^(\d+)-(\d+)$/);
+    if (rangeMatch) {
+      const start = parseInt(rangeMatch[1], 10);
+      const end = parseInt(rangeMatch[2], 10);
+      if (num >= start && num <= end) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
