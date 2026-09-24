@@ -77,8 +77,11 @@ export const getPassage = (
 interface BibleSummary {
   id: number;
   abbreviation: string;
-  localized_abbreviation?: string;
 }
+
+// Only English Bibles are served. Abbreviations are not unique across
+// languages (e.g. "KJV" is also the Thai KJV), so matching is restricted.
+const BIBLE_LANGUAGE = "en";
 
 // Bibles the app key can use, keyed by upper-cased abbreviation. Refreshed
 // daily; licences are managed on platform.youversion.com.
@@ -94,19 +97,17 @@ const fetchAvailableBibles = async (): Promise<Map<string, number>> => {
     const page = await yvpGet<{ data: BibleSummary[]; next_page_token?: string }>(
       "/bibles",
       {
-        // Arrays serialize as language_ranges[]=*&fields[]=id&...
-        language_ranges: ["*"],
-        fields: ["id", "abbreviation", "localized_abbreviation"],
+        // Arrays serialize as language_ranges[]=en&fields[]=id&...
+        language_ranges: [BIBLE_LANGUAGE],
+        fields: ["id", "abbreviation"],
         page_size: "*",
         ...(pageToken ? { page_token: pageToken } : {}),
       }
     );
 
     for (const bible of page.data) {
-      for (const abbr of [bible.abbreviation, bible.localized_abbreviation]) {
-        const key = abbr?.toUpperCase();
-        if (key && !byAbbreviation.has(key)) byAbbreviation.set(key, bible.id);
-      }
+      const key = bible.abbreviation?.toUpperCase();
+      if (key && !byAbbreviation.has(key)) byAbbreviation.set(key, bible.id);
     }
     pageToken = page.next_page_token || undefined;
   } while (pageToken);
@@ -144,7 +145,7 @@ export const resolveVersionId = async (
   return {
     code: 400,
     message:
-      `Bible version '${version}' is not available for this app key. ` +
+      `English Bible version '${version}' is not available for this app key. ` +
       (available.length
         ? `Available: ${available.join(", ")}.`
         : "No Bibles are enabled for this key; enable some on platform.youversion.com."),
