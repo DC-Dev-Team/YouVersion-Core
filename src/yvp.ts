@@ -131,6 +131,12 @@ export const getAvailableBibles = (): Promise<Map<string, number>> => {
 
 // Maps "KJV" / "niv" / "3034" onto an id the app key can use. Numeric input
 // is passed through as a YouVersion Platform Bible id.
+// Common names for versions whose Platform abbreviation differs.
+const VERSION_ALIASES: Record<string, string> = {
+  NIV: "NIV11",
+  NIVUK: "NIVUK11",
+};
+
 export const resolveVersionId = async (
   version: string
 ): Promise<{ id: number; abbreviation: string } | { code: number; message: string }> => {
@@ -142,8 +148,9 @@ export const resolveVersionId = async (
     const abbreviation = [...bibles].find(([, v]) => v === id)?.[0];
     if (abbreviation) return { id, abbreviation };
   } else {
-    const id = bibles.get(input);
-    if (id !== undefined) return { id, abbreviation: input };
+    const abbreviation = bibles.has(input) ? input : VERSION_ALIASES[input];
+    const id = abbreviation ? bibles.get(abbreviation) : undefined;
+    if (id !== undefined) return { id, abbreviation };
   }
 
   // KJV is served locally (see kjv.ts), so it is always available.

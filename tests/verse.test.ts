@@ -101,6 +101,17 @@ describe.skipIf(!process.env.YOU_VERSION_API_KEY)("getVerse (YouVersion)", () =>
     expect(result.verses[16]).toContain("For God so loved the world");
   }, 10_000);
 
+  it("NIV alias resolves to NIV11", async () => {
+    const result = await getVerse("John", "3", "16", "niv");
+
+    if (!expectVerseRange(result)) {
+      throw new Error("Expected verse range result");
+    }
+
+    expect(result.version?.id).toBe(111);
+    expect(result.verses[16]).toContain("For God so loved the world");
+  }, 10_000);
+
   it("Unavailable version returns error", async () => {
     const result = await getVerse("John", "3", "16", "NOT-A-VERSION");
     expect(result).toHaveProperty("code", 400);
