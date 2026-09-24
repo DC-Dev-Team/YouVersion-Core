@@ -3,10 +3,18 @@ export interface Verse {
   verseContent: string;
 }
 
+export interface VersionInfo {
+  id: number;
+  abbreviation: string;
+  title: string;
+  copyright: string;
+}
+
 export interface FullChapterResult {
   title: string;
   verses: Record<number, string>;
   citation: string;
+  version?: VersionInfo;
 }
 
 export interface SingleVerseResult {
@@ -17,6 +25,7 @@ export interface SingleVerseResult {
 export interface VerseRangeResult {
   verses: Record<number, string>;
   citation: string;
+  version?: VersionInfo;
 }
 
 export interface BookInfo {

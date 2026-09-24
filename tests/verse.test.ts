@@ -10,7 +10,8 @@ const expectVerseRange = (result: any): result is VerseRangeResult => {
   return "verses" in result && !("title" in result);
 };
 
-describe("getVerse", () => {
+// Hits the live YouVersion Platform API, so it needs an app key.
+describe.skipIf(!process.env.YOU_VERSION_API_KEY)("getVerse", () => {
   it("John 1 (full chapter, NIV)", async () => {
     const result = await getVerse("John", "1", "-1", "NIV");
 
