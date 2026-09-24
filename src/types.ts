@@ -14,12 +14,20 @@ export interface SingleVerseResult {
   passage: string;
 }
 
+export interface VerseRangeResult {
+  verses: Record<number, string>;
+  citation: string;
+}
+
 export interface BookInfo {
   book: string;
   aliases: string[];
   chapters: number;
 }
 
-export type GetVerseSuccess = FullChapterResult | SingleVerseResult;
-export type GetVerseError = { code: 400; message: string };
+export type GetVerseSuccess =
+  | FullChapterResult
+  | SingleVerseResult
+  | VerseRangeResult;
+export type GetVerseError = { code: number; message: string };
 export type GetVerseResult = GetVerseSuccess | GetVerseError;

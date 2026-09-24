@@ -4,7 +4,7 @@ import { resolveVersion, resolveBook } from "./util";
 import type {
   GetVerseResult,
   FullChapterResult,
-  SingleVerseResult,
+  VerseRangeResult,
 } from "./types";
 
 const BASE_URL = "https://www.bible.com/bible";
@@ -35,11 +35,11 @@ export const getVerse = async (
     };
   }
 
+  // Always fetch the whole chapter and pick the requested verses out of it,
+  // so single verses, ranges ("4-13") and lists ("3,5,7-10") all work.
   const alias = bookInfo.aliases[0];
-  const url =
-    verses === "-1"
-      ? `${BASE_URL}/${versionId}/${alias}.${chapter}`
-      : `${BASE_URL}/${versionId}/${alias}.${chapter}.${verses}`;
+  const url = `${BASE_URL}/${versionId}/${alias}.${chapter}`;
+  const fullChapter = verses === "-1";
 
   try {
     const { data } = await axios.get<string>(url, {
@@ -60,20 +60,6 @@ export const getVerse = async (
     if (nextScript.length) {
       const json = JSON.parse(nextScript.html() || "");
 
-      if (verses !== "-1") {
-        const verseData = json.props.pageProps.verses?.[0];
-        if (!verseData)
-          return { code: 400, message: "Verse not found in JSON data." };
-
-        const passage = cleanText(cheerio.load(verseData.content).text());
-        const reference = verseData.reference.human;
-
-        return {
-          citation: reference,
-          passage,
-        } as SingleVerseResult;
-      }
-
       const chapterHtml = json.props.pageProps.chapterInfo?.content;
       if (!chapterHtml)
         return { code: 400, message: "Chapter content not found." };
@@ -92,6 +78,8 @@ export const getVerse = async (
 
       paverses.forEach((verse: any, index: number) => {
         const verseNumber = index + 1;
+        if (!fullChapter && !matchesRange(verses, verseNumber)) return;
+
         let verseText = cheerio.load(verse)(".content").text();
         verseText = cleanText(verseText);
 
@@ -110,6 +98,16 @@ export const getVerse = async (
         {}
       );
 
+      if (!fullChapter) {
+        if (!versesArray.length)
+          return { code: 400, message: "Verse not found." };
+
+        return {
+          verses: versesObj,
+          citation: `${bookInfo.book} ${chapter}:${verses}`,
+        } as VerseRangeResult;
+      }
+
       return {
         title: titleText || title,
         verses: versesObj,
@@ -118,19 +116,56 @@ export const getVerse = async (
     }
 
     const wrapper = $(".text-17");
-    const versesArray: string[] = [];
 
-    wrapper.each((_, p) => {
+    // Neither the Next.js payload nor the legacy markup is present, e.g.
+    // bible.com served a bot "Client Challenge" page instead of the chapter.
+    if (!wrapper.length) {
+      const pageTitle = $("title").text().trim();
+      console.error(
+        `Unexpected page from ${url}${pageTitle ? ` ("${pageTitle}")` : ""}`
+      );
+      return {
+        code: 502,
+        message: "bible.com returned an unexpected page (possibly blocked).",
+      };
+    }
+
+    const versesObj: Record<number, string> = {};
+
+    wrapper.each((i, p) => {
+      const verseNumber = i + 1;
+      if (!fullChapter && !matchesRange(verses, verseNumber)) return;
+
       const text = cleanText($(p).text());
-      if (text) versesArray.push(text);
+      if (text) versesObj[verseNumber] = text;
     });
 
     return {
-      citation: `${bookInfo.book} ${chapter}:${verses}`,
-      passage: versesArray[0] || "",
-    } as SingleVerseResult;
+      verses: versesObj,
+      citation: fullChapter
+        ? `${bookInfo.book} ${chapter}`
+        : `${bookInfo.book} ${chapter}:${verses}`,
+    } as VerseRangeResult;
   } catch (err) {
     console.error("Error fetching or parsing verse:", err);
     return { code: 400, message: "Failed to fetch or parse verse data." };
   }
 };
+
+// Supports a single verse ("5"), a range ("4-13") or a list ("3,5,7-10").
+function matchesRange(input: string, num: number): boolean {
+  const parts = input.split(",").map((p) => p.trim());
+
+  for (const part of parts) {
+    if (/^\d+$/.test(part) && num === parseInt(part, 10)) return true;
+
+    const rangeMatch = part.match(/^(\d+)-(\d+)$/);
+    if (rangeMatch) {
+      const start = parseInt(rangeMatch[1], 10);
+      const end = parseInt(rangeMatch[2], 10);
+      if (num >= start && num <= end) return true;
+    }
+  }
+
+  return false;
+}

@@ -1,13 +1,13 @@
 import { getVerse } from "../src/verse";
 import { expect, it, describe } from "vitest";
-import type { FullChapterResult, SingleVerseResult } from "../src/types";
+import type { FullChapterResult, VerseRangeResult } from "../src/types";
 
 const expectFullChapter = (result: any): result is FullChapterResult => {
   return "verses" in result && "title" in result;
 };
 
-const expectSingleVerse = (result: any): result is SingleVerseResult => {
-  return "passage" in result;
+const expectVerseRange = (result: any): result is VerseRangeResult => {
+  return "verses" in result && !("title" in result);
 };
 
 describe("getVerse", () => {
@@ -33,13 +33,13 @@ describe("getVerse", () => {
   it("John 3:16 (single verse, ESV)", async () => {
     const result = await getVerse("John", "3", "16", "ESV");
 
-    if (!expectSingleVerse(result)) {
-      throw new Error("Expected single verse result");
+    if (!expectVerseRange(result)) {
+      throw new Error("Expected verse range result");
     }
 
     expect(result.citation).toBe("John 3:16");
-    expect(result.passage).toContain("For God so loved the world");
-    expect(result.passage).toContain("that he gave his one and only Son");
+    expect(Object.keys(result.verses)).toEqual(["16"]);
+    expect(result.verses[16]).toContain("For God so loved the world");
   }, 10_000);
 
   it("Psalms 23 (full chapter, KJV)", async () => {
@@ -58,15 +58,17 @@ describe("getVerse", () => {
   it("Genesis 1:1-5 (multiple verses, BIBEL.HEUTE)", async () => {
     const result = await getVerse("Genesis", "1", "1-5", "BiBEl.hEuTe");
 
-    if (!expectSingleVerse(result)) {
-      throw new Error("Expected single verse result");
+    if (!expectVerseRange(result)) {
+      throw new Error("Expected verse range result");
     }
 
-    expect(result.citation).toBe("1. Mose 1:1-5");
+    expect(result.citation).toBe("Genesis 1:1-5");
+    expect(Object.keys(result.verses)).toEqual(["1", "2", "3", "4", "5"]);
 
-    expect(result.passage).toContain("Im Anfang schuf Gott Himmel und Erde.");
-    expect(result.passage).toContain("Die Erde war formlos und leer.");
-    expect(result.passage).toContain(
+    const passage = Object.values(result.verses).join(" ");
+    expect(passage).toContain("Im Anfang schuf Gott Himmel und Erde.");
+    expect(passage).toContain("Die Erde war formlos und leer.");
+    expect(passage).toContain(
       "Finsternis lag über der Tiefe, und der Geist Gottes schwebte über dem Wasser."
     );
   }, 10_000);
