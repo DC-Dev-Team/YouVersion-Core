@@ -6,10 +6,12 @@ import {
   resolveVersionId,
   toApiError,
 } from "./yvp";
+import { getKjvChapter, isLocalKjv, KJV_INFO } from "./kjv";
 import type {
   GetVerseResult,
   FullChapterResult,
   VerseRangeResult,
+  VersionInfo,
 } from "./types";
 
 const cleanText = (html: string): string => {
@@ -66,50 +68,61 @@ export const getVerse = async (
   const usfm = `${bookInfo.aliases[0]}.${chapter}`;
   const fullChapter = verses === "-1";
 
-  let versionId: number | undefined;
+  let chapterVerses: Map<number, string>;
+  let heading: string | undefined;
+  let versionInfo: VersionInfo | undefined;
 
-  try {
-    const resolved = await resolveVersionId(version);
-    if ("code" in resolved) return resolved;
-    versionId = resolved.id;
+  if (isLocalKjv(version)) {
+    const kjvChapter = getKjvChapter(bookInfo.aliases[0], chapter);
+    if (!kjvChapter) return { code: 400, message: "Verse not found." };
+    chapterVerses = kjvChapter;
+    versionInfo = KJV_INFO;
+  } else {
+    let versionId: number | undefined;
 
-    const [passage, versionInfo] = await Promise.all([
-      getPassage(versionId, usfm, "html", true),
-      getVersionInfo(versionId),
-    ]);
+    try {
+      const resolved = await resolveVersionId(version);
+      if ("code" in resolved) return resolved;
+      versionId = resolved.id;
 
-    const allVerses = splitVerses(passage.content);
-    const versesObj: Record<number, string> = {};
-    for (const [n, text] of allVerses) {
-      if (fullChapter || matchesRange(verses, n)) versesObj[n] = text;
-    }
+      const [passage, info] = await Promise.all([
+        getPassage(versionId, usfm, "html", true),
+        getVersionInfo(versionId),
+      ]);
 
-    if (!Object.keys(versesObj).length)
-      return { code: 400, message: "Verse not found." };
-
-    if (fullChapter) {
-      const title =
+      chapterVerses = splitVerses(passage.content);
+      heading =
         cheerio.load(passage.content)(".yv-h").first().text().trim() ||
-        passage.reference ||
-        `${bookInfo.book} ${chapter}`;
-
-      return {
-        title,
-        verses: versesObj,
-        citation: `${bookInfo.book} ${chapter}`,
-        version: versionInfo,
-      } as FullChapterResult;
+        passage.reference;
+      versionInfo = info;
+    } catch (err) {
+      console.error(`Error fetching ${usfm} (version ${versionId}):`, err);
+      return toApiError(err);
     }
-
-    return {
-      verses: versesObj,
-      citation: `${bookInfo.book} ${chapter}:${verses}`,
-      version: versionInfo,
-    } as VerseRangeResult;
-  } catch (err) {
-    console.error(`Error fetching ${usfm} (version ${versionId}):`, err);
-    return toApiError(err);
   }
+
+  const versesObj: Record<number, string> = {};
+  for (const [n, text] of chapterVerses) {
+    if (fullChapter || matchesRange(verses, n)) versesObj[n] = text;
+  }
+
+  if (!Object.keys(versesObj).length)
+    return { code: 400, message: "Verse not found." };
+
+  if (fullChapter) {
+    return {
+      title: heading || `${bookInfo.book} ${chapter}`,
+      verses: versesObj,
+      citation: `${bookInfo.book} ${chapter}`,
+      version: versionInfo,
+    } as FullChapterResult;
+  }
+
+  return {
+    verses: versesObj,
+    citation: `${bookInfo.book} ${chapter}:${verses}`,
+    version: versionInfo,
+  } as VerseRangeResult;
 };
 
 // Supports a single verse ("5"), a range ("4-13") or a list ("3,5,7-10").

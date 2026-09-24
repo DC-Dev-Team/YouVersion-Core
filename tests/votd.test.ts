@@ -11,5 +11,12 @@ describe.skipIf(!process.env.YOU_VERSION_API_KEY)("getVotd", () => {
     expect(verse?.passage).toBeDefined();
 
     expect(verse2).toBeUndefined();
-  });
+  }, 10_000);
+
+  it("VOTD in KJV (local text)", async () => {
+    const verse = await getVotd("en", "KJV");
+
+    expect(verse?.version).toBe("KJV");
+    expect(verse?.passage).toBeTruthy();
+  }, 10_000);
 });

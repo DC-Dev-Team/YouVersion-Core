@@ -94,7 +94,9 @@ const fetchAvailableBibles = async (): Promise<Map<string, number>> => {
   let pageToken: string | undefined;
 
   do {
-    const page = await yvpGet<{ data: BibleSummary[]; next_page_token?: string }>(
+    const page = await yvpGet<
+      { data: BibleSummary[]; next_page_token?: string } | ""
+    >(
       "/bibles",
       {
         // Arrays serialize as language_ranges[]=en&fields[]=id&...
@@ -105,7 +107,10 @@ const fetchAvailableBibles = async (): Promise<Map<string, number>> => {
       }
     );
 
-    for (const bible of page.data) {
+    // 204 No Content (empty body) means no Bibles for the language.
+    if (!page) break;
+
+    for (const bible of page.data ?? []) {
       const key = bible.abbreviation?.toUpperCase();
       if (key && !byAbbreviation.has(key)) byAbbreviation.set(key, bible.id);
     }
@@ -141,7 +146,8 @@ export const resolveVersionId = async (
     if (id !== undefined) return { id, abbreviation: input };
   }
 
-  const available = [...new Set(bibles.keys())].sort();
+  // KJV is served locally (see kjv.ts), so it is always available.
+  const available = [...new Set([...bibles.keys(), "KJV"])].sort();
   return {
     code: 400,
     message:
