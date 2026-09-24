@@ -1,5 +1,4 @@
-import { resolveVersion } from "./util";
-import { getPassage, yvpGet, YvpError } from "./yvp";
+import { getPassage, resolveVersionId, yvpGet, YvpError } from "./yvp";
 
 export interface VotdResult {
   citation: string;
@@ -43,8 +42,9 @@ export const getVotd = async (
 
   let bible: { id: number; abbreviation?: string } | undefined;
   if (version) {
-    const { id, key } = resolveVersion(version);
-    bible = { id, abbreviation: key };
+    const resolved = await resolveVersionId(version);
+    if ("code" in resolved) throw new YvpError(resolved.code, resolved.message);
+    bible = resolved;
   } else {
     for (const language of lang.split(",").map((l) => l.trim())) {
       bible = language ? await firstBibleForLanguage(language) : undefined;

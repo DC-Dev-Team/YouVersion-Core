@@ -1,6 +1,11 @@
 import * as cheerio from "cheerio";
-import { resolveVersion, resolveBook } from "./util";
-import { getPassage, getVersionInfo, toApiError } from "./yvp";
+import { resolveBook } from "./util";
+import {
+  getPassage,
+  getVersionInfo,
+  resolveVersionId,
+  toApiError,
+} from "./yvp";
 import type {
   GetVerseResult,
   FullChapterResult,
@@ -47,7 +52,6 @@ export const getVerse = async (
   verses: string,
   version: string
 ): Promise<GetVerseResult> => {
-  const { id: versionId } = resolveVersion(version);
   const bookInfo = resolveBook(book);
 
   if (!bookInfo) {
@@ -62,7 +66,13 @@ export const getVerse = async (
   const usfm = `${bookInfo.aliases[0]}.${chapter}`;
   const fullChapter = verses === "-1";
 
+  let versionId: number | undefined;
+
   try {
+    const resolved = await resolveVersionId(version);
+    if ("code" in resolved) return resolved;
+    versionId = resolved.id;
+
     const [passage, versionInfo] = await Promise.all([
       getPassage(versionId, usfm, "html", true),
       getVersionInfo(versionId),
