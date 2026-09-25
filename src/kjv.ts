@@ -15,7 +15,7 @@ export const KJV_INFO: VersionInfo = {
 };
 
 export const isLocalKjv = (version: string): boolean =>
-  version.trim().toUpperCase() === "KJV";
+  ["KJV", "1"].includes(version.trim().toUpperCase());
 
 let kjv: KjvBible | undefined;
 
