@@ -1,5 +1,6 @@
 import axios, { AxiosError } from "axios";
-import type { VersionInfo } from "./types";
+import type { AvailableVersion, VersionInfo } from "./types";
+import { KJV_INFO } from "./kjv";
 import { createPassageCache, TtlCache } from "./cache";
 
 // YouVersion Platform API: https://developers.youversion.com
@@ -77,20 +78,50 @@ export const getPassage = (
 interface BibleSummary {
   id: number;
   abbreviation: string;
+  language_tag?: string;
+  books?: string[];
 }
 
-// Only English Bibles are served. Abbreviations are not unique across
-// languages (e.g. "KJV" is also the Thai KJV), so matching is restricted.
-const BIBLE_LANGUAGE = "en";
+interface BibleDetails extends BibleSummary {
+  title: string;
+  copyright: string;
+  localized_abbreviation?: string;
+  localized_title?: string;
+}
 
-// Bibles the app key can use, keyed by upper-cased abbreviation. Refreshed
-// daily; licences are managed on platform.youversion.com.
+const DEFAULT_BIBLE_LANGUAGE = "en";
+
+// YouVersion accepts BCP-47 basic language ranges. Passage selection must be
+// a single language (not a wildcard) so duplicate abbreviations are resolved
+// deterministically.
+const LANGUAGE_RANGE = /^(?:\*|[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)$/;
+
+export const normalizeLanguage = (
+  language = DEFAULT_BIBLE_LANGUAGE,
+  allowWildcard = false
+): string | undefined => {
+  const normalized = language.trim();
+  if (!normalized || !LANGUAGE_RANGE.test(normalized)) return undefined;
+  if (!allowWildcard && normalized === "*") return undefined;
+  return normalized === "*" ? normalized : normalized.toLowerCase();
+};
+
+export const isEnglishLanguage = (language: string): boolean =>
+  language.toLowerCase() === "en" || language.toLowerCase().startsWith("en-");
+
+// Language-scoped Bible catalogues the app key can use. Refreshed daily;
+// licences are managed on platform.youversion.com.
 const BIBLES_TTL_MS = 24 * 60 * 60 * 1000;
-let biblesRequest: Promise<Map<string, number>> | undefined;
-let biblesFetchedAt = 0;
+const biblesRequests = new Map<
+  string,
+  { fetchedAt: number; request: Promise<BibleSummary[]> }
+>();
 
-const fetchAvailableBibles = async (): Promise<Map<string, number>> => {
-  const byAbbreviation = new Map<string, number>();
+const fetchAvailableBibles = async (
+  language: string,
+  includeBooks: boolean
+): Promise<BibleSummary[]> => {
+  const bibles: BibleSummary[] = [];
   let pageToken: string | undefined;
 
   do {
@@ -99,9 +130,13 @@ const fetchAvailableBibles = async (): Promise<Map<string, number>> => {
     >(
       "/bibles",
       {
-        // Arrays serialize as language_ranges[]=en&fields[]=id&...
-        language_ranges: [BIBLE_LANGUAGE],
-        fields: ["id", "abbreviation"],
+        language_ranges: [language],
+        // YouVersion permits page_size=* with up to three fields. Catalogue
+        // responses need the language tag; automatic passage selection swaps
+        // that field for `books` to avoid choosing an incompatible partial Bible.
+        fields: includeBooks
+          ? ["id", "abbreviation", "books"]
+          : ["id", "abbreviation", "language_tag"],
         page_size: "*",
         ...(pageToken ? { page_token: pageToken } : {}),
       }
@@ -110,23 +145,53 @@ const fetchAvailableBibles = async (): Promise<Map<string, number>> => {
     // 204 No Content (empty body) means no Bibles for the language.
     if (!page) break;
 
-    for (const bible of page.data ?? []) {
-      const key = bible.abbreviation?.toUpperCase();
-      if (key && !byAbbreviation.has(key)) byAbbreviation.set(key, bible.id);
-    }
+    bibles.push(...(page.data ?? []));
     pageToken = page.next_page_token || undefined;
   } while (pageToken);
 
-  return byAbbreviation;
+  return bibles;
 };
 
-export const getAvailableBibles = (): Promise<Map<string, number>> => {
-  if (!biblesRequest || Date.now() - biblesFetchedAt > BIBLES_TTL_MS) {
-    biblesFetchedAt = Date.now();
-    biblesRequest = fetchAvailableBibles();
-    biblesRequest.catch(() => (biblesRequest = undefined));
+export const getAvailableBibles = (
+  language = DEFAULT_BIBLE_LANGUAGE,
+  includeBooks = false
+): Promise<BibleSummary[]> => {
+  const cacheKey = `${language}:${includeBooks ? "books" : "catalogue"}`;
+  const cached = biblesRequests.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt <= BIBLES_TTL_MS) {
+    return cached.request;
   }
-  return biblesRequest;
+
+  const request = fetchAvailableBibles(language, includeBooks);
+  biblesRequests.set(cacheKey, { fetchedAt: Date.now(), request });
+  request.catch(() => biblesRequests.delete(cacheKey));
+  return request;
+};
+
+export const listAvailableVersions = async (
+  language = DEFAULT_BIBLE_LANGUAGE
+): Promise<AvailableVersion[]> => {
+  const normalized = normalizeLanguage(language, true);
+  if (!normalized) throw new YvpError(400, `Invalid language range '${language}'.`);
+
+  const upstream = getAppKey() ? await getAvailableBibles(normalized) : [];
+  const versions: AvailableVersion[] = upstream.map((bible) => ({
+    id: bible.id,
+    abbreviation: bible.abbreviation,
+    languageTag: bible.language_tag ?? normalized,
+    source: "youversion",
+  }));
+
+  if (normalized === "*" || isEnglishLanguage(normalized)) {
+    versions.unshift({
+      id: KJV_INFO.id,
+      abbreviation: KJV_INFO.abbreviation,
+      languageTag: "en",
+      source: "local",
+    });
+  }
+
+  return versions;
 };
 
 // Maps "KJV" / "niv" / "3034" onto an id the app key can use. Numeric input
@@ -138,27 +203,53 @@ const VERSION_ALIASES: Record<string, string> = {
 };
 
 export const resolveVersionId = async (
-  version: string
+  version: string | undefined,
+  language = DEFAULT_BIBLE_LANGUAGE,
+  bookId?: string
 ): Promise<{ id: number; abbreviation: string } | { code: number; message: string }> => {
-  const bibles = await getAvailableBibles();
-  const input = version.trim().toUpperCase();
+  const normalized = normalizeLanguage(language);
+  if (!normalized) {
+    return { code: 400, message: `Invalid language '${language}'.` };
+  }
+
+  const bibles = await getAvailableBibles(normalized, !version && !!bookId);
+  const byAbbreviation = new Map<string, number>();
+  for (const bible of bibles) {
+    const key = bible.abbreviation?.toUpperCase();
+    if (key && !byAbbreviation.has(key)) byAbbreviation.set(key, bible.id);
+  }
+
+  const input = version?.trim().toUpperCase();
+
+  if (!input) {
+    const first = bookId
+      ? bibles.find((bible) => bible.books?.includes(bookId))
+      : bibles[0];
+    if (first) return { id: first.id, abbreviation: first.abbreviation };
+    return {
+      code: 400,
+      message: bookId
+        ? `No Bible versions containing '${bookId}' are available for language '${normalized}'.`
+        : `No Bible versions are available for language '${normalized}'.`,
+    };
+  }
 
   if (/^\d+$/.test(input)) {
     const id = parseInt(input, 10);
-    const abbreviation = [...bibles].find(([, v]) => v === id)?.[0];
+    const abbreviation = bibles.find((bible) => bible.id === id)?.abbreviation;
     if (abbreviation) return { id, abbreviation };
   } else {
-    const abbreviation = bibles.has(input) ? input : VERSION_ALIASES[input];
-    const id = abbreviation ? bibles.get(abbreviation) : undefined;
+    const abbreviation = byAbbreviation.has(input) ? input : VERSION_ALIASES[input];
+    const id = abbreviation ? byAbbreviation.get(abbreviation) : undefined;
     if (id !== undefined) return { id, abbreviation };
   }
 
-  // KJV is served locally (see kjv.ts), so it is always available.
-  const available = [...new Set([...bibles.keys(), "KJV"])].sort();
+  const local = isEnglishLanguage(normalized) ? ["KJV"] : [];
+  const available = [...new Set([...byAbbreviation.keys(), ...local])].sort();
   return {
     code: 400,
     message:
-      `English Bible version '${version}' is not available for this app key. ` +
+      `Bible version '${version}' is not available for language '${normalized}' and this app key. ` +
       (available.length
         ? `Available: ${available.join(", ")}.`
         : "No Bibles are enabled for this key; enable some on platform.youversion.com."),
@@ -177,14 +268,15 @@ export const getVersionInfo = async (
   if (cached) return cached;
 
   try {
-    const bible = await yvpGet<VersionInfo & Record<string, unknown>>(
-      `/bibles/${versionId}`
-    );
+    const bible = await yvpGet<BibleDetails>(`/bibles/${versionId}`);
     const info: VersionInfo = {
       id: bible.id,
       abbreviation: bible.abbreviation,
       title: bible.title,
       copyright: bible.copyright,
+      languageTag: bible.language_tag,
+      localizedAbbreviation: bible.localized_abbreviation,
+      localizedTitle: bible.localized_title,
     };
     versionCache.set(versionId, info);
     return info;

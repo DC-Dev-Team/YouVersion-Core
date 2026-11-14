@@ -3,6 +3,8 @@ import { resolveBook } from "./util";
 import {
   getPassage,
   getVersionInfo,
+  isEnglishLanguage,
+  normalizeLanguage,
   resolveVersionId,
   toApiError,
 } from "./yvp";
@@ -52,7 +54,8 @@ export const getVerse = async (
   book: string,
   chapter: string,
   verses: string,
-  version: string
+  version?: string,
+  language = "en"
 ): Promise<GetVerseResult> => {
   const bookInfo = resolveBook(book);
 
@@ -72,7 +75,12 @@ export const getVerse = async (
   let heading: string | undefined;
   let versionInfo: VersionInfo | undefined;
 
-  if (isLocalKjv(version)) {
+  const normalizedLanguage = normalizeLanguage(language);
+  if (!normalizedLanguage) {
+    return { code: 400, message: `Invalid language '${language}'.` };
+  }
+
+  if (version && isEnglishLanguage(normalizedLanguage) && isLocalKjv(version)) {
     const kjvChapter = getKjvChapter(bookInfo.aliases[0], chapter);
     if (!kjvChapter) return { code: 400, message: "Verse not found." };
     chapterVerses = kjvChapter;
@@ -81,7 +89,11 @@ export const getVerse = async (
     let versionId: number | undefined;
 
     try {
-      const resolved = await resolveVersionId(version);
+      const resolved = await resolveVersionId(
+        version,
+        normalizedLanguage,
+        bookInfo.aliases[0]
+      );
       if ("code" in resolved) return resolved;
       versionId = resolved.id;
 
