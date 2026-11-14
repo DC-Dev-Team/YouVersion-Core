@@ -1,5 +1,12 @@
 import { getKjvPassage, isLocalKjv } from "./kjv";
-import { getPassage, resolveVersionId, yvpGet, YvpError } from "./yvp";
+import {
+  getPassage,
+  isEnglishLanguage,
+  normalizeLanguage,
+  resolveVersionId,
+  yvpGet,
+  YvpError,
+} from "./yvp";
 
 export interface VotdResult {
   citation: string;
@@ -42,7 +49,15 @@ export const getVotd = async (
     `/verse_of_the_days/${dayOfYear()}`
   );
 
-  if (version && isLocalKjv(version)) {
+  const languages = lang.split(",").map((l) => l.trim()).filter(Boolean);
+  const primaryLanguage = normalizeLanguage(languages[0] || "en");
+
+  if (
+    version &&
+    primaryLanguage &&
+    isEnglishLanguage(primaryLanguage) &&
+    isLocalKjv(version)
+  ) {
     const passage = getKjvPassage(passage_id);
     if (!passage) throw new YvpError(502, `KJV has no passage '${passage_id}'.`);
     return { citation: passage.reference, passage: passage.content, images: [], version: "KJV" };
@@ -50,11 +65,12 @@ export const getVotd = async (
 
   let bible: { id: number; abbreviation?: string } | undefined;
   if (version) {
-    const resolved = await resolveVersionId(version);
+    if (!primaryLanguage) return undefined;
+    const resolved = await resolveVersionId(version, primaryLanguage);
     if ("code" in resolved) throw new YvpError(resolved.code, resolved.message);
     bible = resolved;
   } else {
-    for (const language of lang.split(",").map((l) => l.trim())) {
+    for (const language of languages) {
       bible = language ? await firstBibleForLanguage(language) : undefined;
       if (bible) break;
     }
