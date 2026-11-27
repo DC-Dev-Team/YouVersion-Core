@@ -16,6 +16,7 @@ export interface VersionInfo {
 export interface AvailableVersion {
   id: number;
   abbreviation: string;
+  title: string;
   languageTag: string;
   source: "local" | "youversion";
 }

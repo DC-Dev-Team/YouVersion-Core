@@ -35,6 +35,7 @@ describe("available versions", () => {
       {
         id: 1,
         abbreviation: "KJV",
+        title: "King James Version",
         languageTag: "en",
         source: "local",
       },
@@ -51,6 +52,7 @@ describe.skipIf(!process.env.YOU_VERSION_API_KEY)("multilingual YouVersion", () 
   it("lists Spanish versions and fetches a Spanish passage", async () => {
     const versions = await listAvailableVersions("es");
     expect(versions.length).toBeGreaterThan(0);
+    expect(versions.every((version) => version.title.trim().length > 0)).toBe(true);
     expect(versions.every((version) => version.languageTag.startsWith("es"))).toBe(true);
 
     const result = await getVerse(

@@ -78,6 +78,7 @@ export const getPassage = (
 interface BibleSummary {
   id: number;
   abbreviation: string;
+  title?: string;
   language_tag?: string;
   books?: string[];
 }
@@ -131,13 +132,11 @@ const fetchAvailableBibles = async (
       "/bibles",
       {
         language_ranges: [language],
-        // YouVersion permits page_size=* with up to three fields. Catalogue
-        // responses need the language tag; automatic passage selection swaps
-        // that field for `books` to avoid choosing an incompatible partial Bible.
+        // YouVersion permits page_size=* only for up to three fields.
         fields: includeBooks
           ? ["id", "abbreviation", "books"]
-          : ["id", "abbreviation", "language_tag"],
-        page_size: "*",
+          : ["id", "abbreviation", "title", "language_tag"],
+        page_size: includeBooks ? "*" : 99,
         ...(pageToken ? { page_token: pageToken } : {}),
       }
     );
@@ -175,17 +174,22 @@ export const listAvailableVersions = async (
   if (!normalized) throw new YvpError(400, `Invalid language range '${language}'.`);
 
   const upstream = getAppKey() ? await getAvailableBibles(normalized) : [];
-  const versions: AvailableVersion[] = upstream.map((bible) => ({
-    id: bible.id,
-    abbreviation: bible.abbreviation,
-    languageTag: bible.language_tag ?? normalized,
-    source: "youversion",
-  }));
+  const versions: AvailableVersion[] = upstream.map((bible) => {
+    if (!bible.title) throw new YvpError(502, `Missing title for Bible ${bible.id}.`);
+    return {
+      id: bible.id,
+      abbreviation: bible.abbreviation,
+      title: bible.title,
+      languageTag: bible.language_tag ?? normalized,
+      source: "youversion",
+    };
+  });
 
   if (normalized === "*" || isEnglishLanguage(normalized)) {
     versions.unshift({
       id: KJV_INFO.id,
       abbreviation: KJV_INFO.abbreviation,
+      title: KJV_INFO.title,
       languageTag: "en",
       source: "local",
     });
