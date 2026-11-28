@@ -12,6 +12,9 @@ export const KJV_INFO: VersionInfo = {
   abbreviation: "KJV",
   title: "King James Version",
   copyright: "Public Domain",
+  languageTag: "en",
+  localizedAbbreviation: "KJV",
+  localizedTitle: "King James Version",
 };
 
 export const isLocalKjv = (version: string): boolean =>

@@ -8,6 +8,17 @@ export interface VersionInfo {
   abbreviation: string;
   title: string;
   copyright: string;
+  languageTag?: string;
+  localizedAbbreviation?: string;
+  localizedTitle?: string;
+}
+
+export interface AvailableVersion {
+  id: number;
+  abbreviation: string;
+  title: string;
+  languageTag: string;
+  source: "local" | "youversion";
 }
 
 export interface FullChapterResult {
